@@ -1,39 +1,88 @@
-#!/data/data/com.termux/files/usr/bin/bash
+@echo off
+setlocal EnableDelayedExpansion
+color 0A
+title 🚀 Setup Nas Unmineable Miner - By Nas
 
-echo "=== Installation complète de NasMiner et xmrig pour Termux ==="
+:: Fonctions d'affichage
+set LINE============================================================
+echo.
+echo ███╗   ██╗ █████╗ ███████╗███╗   ███╗██╗███╗   ██╗███████╗██████╗ 
+echo ████╗  ██║██╔══██╗██╔════╝████╗ ████║██║████╗  ██║██╔════╝██╔══██╗
+echo ██╔██╗ ██║███████║███████╗██╔████╔██║██║██╔██╗ ██║█████╗  ██████╔╝
+echo ██║╚██╗██║██╔══██║╚════██║██║╚██╔╝██║██║██║╚██╗██║██╔══╝  ██╔══██╗
+echo ██║ ╚████║██║  ██║███████║██║ ╚═╝ ██║██║██║ ╚████║███████╗██║  ██║
+echo ╚═╝  ╚═══╝╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚═╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝
+echo %LINE%
+echo     💡 Script d'installation automatique par Nas
+echo %LINE%
+echo.
 
-# Met à jour Termux et installe dépendances essentielles
-pkg update -y && pkg upgrade -y
-pkg install -y git python clang make
+:: Vérification Python
+where python >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [❌] Python non détecté ! Installe-le : https://www.python.org/downloads/
+    pause
+    exit /b
+) else (
+    echo [✔] Python détecté.
+)
 
-# Installe cmake (nécessaire pour compiler xmrig)
-pkg install -y cmake
+:: Vérification pip
+where pip >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [❌] Pip non détecté. Réinstalle Python avec l'option "Add to PATH".
+    pause
+    exit /b
+) else (
+    echo [✔] Pip détecté.
+)
 
-# Cloner NasMiner si pas présent
-if [ ! -d "NasMiner" ]; then
-    echo "Clonage de NasMiner..."
-    git clone https://github.com/NasC0rp/NasMiner.git
-else
-    echo "NasMiner déjà présent"
-fi
+:: Vérification du script principal
+if not exist "nasminer.py" (
+    echo [❌] Fichier "nasminer.py" introuvable dans ce dossier !
+    echo     💡 Assure-toi qu’il est bien ici.
+    pause
+    exit /b
+) else (
+    echo [✔] Script Python "nasminer.py" trouvé.
+)
 
-cd NasMiner
+:: Installation de colorama
+echo.
+echo [*] Vérification du module colorama...
+pip show colorama >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [~] colorama non présent → installation...
+    pip install colorama >nul 2>&1
+    if %errorlevel% neq 0 (
+        echo [❌] Échec d'installation de colorama.
+        pause
+        exit /b
+    ) else (
+        echo [✔] colorama installé.
+    )
+) else (
+    echo [✔] colorama déjà installé.
+)
 
-# Installer les dépendances Python
-pip install --upgrade pip
-pip install -r requirements.txt
+:: Vérifie et télécharge XMRig si manquant
+if not exist "xmrig.exe" (
+    echo.
+    echo [*] XMRig non trouvé → téléchargement...
+    curl -L -o xmrig.zip https://github.com/xmrig/xmrig/releases/download/v6.21.1/xmrig-6.21.1-msvc-win64.zip
+    powershell -Command "Expand-Archive -Path xmrig.zip -DestinationPath xmrig"
+    move xmrig\xmrig-6.21.1\xmrig.exe . >nul
+    rd /s /q xmrig
+    del xmrig.zip
+    echo [✔] XMRig téléchargé avec succès.
+) else (
+    echo [✔] XMRig déjà présent.
+)
 
-# Télécharger la dernière version précompilée de xmrig pour Android Termux (ARM64)
-if [ ! -f "xmrig" ]; then
-    echo "Téléchargement de xmrig..."
-    wget https://github.com/xmrig/xmrig/releases/download/v6.18.1/xmrig-6.18.1-linux-arm64.tar.gz
-    tar -xzf xmrig-6.18.1-linux-arm64.tar.gz
-    mv xmrig-6.18.1/xmrig ./xmrig
-    rm -rf xmrig-6.18.1 xmrig-6.18.1-linux-arm64.tar.gz
-fi
+:: Lancement
+echo.
+echo [*] Démarrage de NasMiner...
+python nasminer.py
 
-# Donner les droits d’exécution à xmrig
-chmod +x xmrig
-
-echo "Installation terminée ! Pour lancer le miner :"
-echo "cd NasMiner && python main.py"
+pause
+exit /b
