@@ -3,6 +3,7 @@ import platform
 import subprocess
 import time
 import json
+import shutil
 from colorama import init, Fore
 
 init(autoreset=True)
@@ -16,7 +17,7 @@ ASCII_BANNER = f"""{Fore.RED}
 ██║╚██╗██║██╔══██║╚════██║██║╚██╔╝██║██║██║╚██╗██║██╔══╝  ██╔══██╗
 ██║ ╚████║██║  ██║███████║██║ ╚═╝ ██║██║██║ ╚████║███████╗██║  ██║
 ╚═╝  ╚═══╝╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚═╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝
-{Fore.WHITE}         Miner Unmineable - Wallets config, worker manuel
+{Fore.WHITE}        Miner Unmineable - Wallets config, worker manuel
 """
 
 DEFAULT_WALLETS = {
@@ -33,7 +34,7 @@ def load_wallets():
     if not os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "w") as f:
             json.dump(DEFAULT_WALLETS, f, indent=4)
-        return DEFAULT_WALLETS
+        return DEFAULT_WALLETS.copy()
     with open(CONFIG_FILE, "r") as f:
         return json.load(f)
 
@@ -44,97 +45,117 @@ def save_wallets(wallets):
 def is_windows():
     return platform.system() == "Windows"
 
-def check_xmrig():
-    return os.path.isfile("xmrig") or os.path.isfile("xmrig.exe")
+def is_termux():
+    return "com.termux" in os.getenv("PREFIX", "")
 
-def download_xmrig():
-    print(f"{Fore.YELLOW}🔽 Téléchargement de XMRig...")
+def check_xmrig():
+    """Vérifie que xmrig est présent et exécutable, sinon compile ou fixe les permissions."""
+    xmrig_path = "xmrig.exe" if is_windows() else "xmrig"
+    if not os.path.isfile(xmrig_path):
+        print(Fore.YELLOW + "[⚠️] xmrig introuvable, compilation nécessaire..." + Fore.RESET)
+        compile_xmrig()
+    elif not os.access(xmrig_path, os.X_OK):
+        print(Fore.YELLOW + "[🔐] Ajout des permissions à xmrig..." + Fore.RESET)
+        os.chmod(xmrig_path, 0o755)
+    else:
+        print(Fore.GREEN + "[✔️] xmrig prêt à l’emploi." + Fore.RESET)
+
+def compile_xmrig():
+    """Clone et compile xmrig sur Termux/Linux ARM64 ou télécharge le zip Windows."""
     if is_windows():
         url = "https://github.com/xmrig/xmrig/releases/download/v6.21.1/xmrig-6.21.1-msvc-win64.zip"
-        os.system(f"curl -L -o xmrig.zip {url}")
-        os.system("powershell Expand-Archive xmrig.zip .")
-        os.system("move xmrig-6.21.1\\xmrig.exe . && del xmrig.zip && rmdir /S /Q xmrig-6.21.1")
+        subprocess.run(f"curl -L -o xmrig.zip {url}", shell=True)
+        subprocess.run("powershell Expand-Archive xmrig.zip .", shell=True)
+        # Déplace le binaire root
+        shutil.move("xmrig-6.21.1\\xmrig.exe", "xmrig.exe")
+        subprocess.run("del /Q xmrig.zip & rmdir /S /Q xmrig-6.21.1", shell=True)
     else:
-        os.system("pkg install wget unzip -y > /dev/null 2>&1 || true")
-        url = "https://github.com/xmrig/xmrig/releases/download/v6.21.1/xmrig-6.21.1-linux-static-arm64.zip"
-        os.system(f"wget -O xmrig.zip {url}")
-        os.system("unzip xmrig.zip && mv xmrig-6.21.1/* ./ && chmod +x xmrig")
-        os.system("rm -rf xmrig.zip xmrig-6.21.1")
-    print(f"{Fore.GREEN}✅ XMRig prêt.\n")
+        # Termux ou Linux ARM64
+        deps = "git cmake clang build-essential automake autoconf libuv-dev openssl-dev libhwloc-dev"
+        subprocess.run(f"pkg install -y {deps}", shell=True)
+        if os.path.isdir("xmrig"):
+            shutil.rmtree("xmrig")
+        subprocess.run("git clone https://github.com/xmrig/xmrig.git", shell=True)
+        os.chdir("xmrig")
+        os.mkdir("build"); os.chdir("build")
+        subprocess.run("cmake .. -DWITH_HWLOC=OFF -DCMAKE_BUILD_TYPE=Release", shell=True)
+        subprocess.run(f"make -j$(nproc)", shell=True)
+        # Copie le binaire à la racine
+        shutil.copy("xmrig", os.path.join("..","..","xmrig"))
+        os.chdir(os.path.join("..",".."))
+    # Permissions
+    xmrig_path = "xmrig.exe" if is_windows() else "xmrig"
+    os.chmod(xmrig_path, 0o755)
+    print(Fore.GREEN + "[✅] Compilation / installation de xmrig terminée !" + Fore.RESET)
 
 def select_coin(wallets):
-    print(f"{Fore.BLUE}=== Choisis une crypto ===")
+    print(Fore.BLUE + "=== Choisis une crypto ===")
     for i, coin in enumerate(wallets, 1):
-        print(f"{Fore.GREEN}[{i}] {coin} → {wallets[coin]}")
+        print(Fore.GREEN + f"[{i}] {coin} → {wallets[coin]}")
     try:
-        choice = int(input(f"{Fore.YELLOW}\n👉 Choix (1-{len(wallets)}) : "))
-        coin = list(wallets.keys())[choice - 1]
-        return coin
+        idx = int(input(Fore.YELLOW + "\n👉 Choix (1-{len(wallets)}) : " + Fore.RESET))
+        return list(wallets.keys())[idx - 1]
     except:
-        print(f"{Fore.RED}❌ Mauvais choix.")
+        print(Fore.RED + "❌ Mauvais choix." + Fore.RESET)
         return select_coin(wallets)
 
 def input_worker():
-    worker = input(f"{Fore.YELLOW}🛠️  Entre le nom du worker (ex: NasMiner01) : ").strip()
-    return worker if worker else "NasMiner01"
+    w = input(Fore.YELLOW + "🛠 Nom du worker (ex: NasMiner01) : " + Fore.RESET).strip()
+    return w if w else "NasMiner01"
 
 def start_mining(coin, wallet, worker):
-    full_address = f"{coin}:{wallet}.{worker}"
-    print(f"{Fore.CYAN}🚀 Minage {coin} → {full_address}\n")
-    time.sleep(1)
-
-    cmd = ["./xmrig" if not is_windows() else "xmrig.exe",
-           "-a", "rx",
-           "-o", "rx.unmineable.com:3333",
-           "-u", full_address,
+    check_xmrig()
+    full = f"{coin}:{wallet}.{worker}"
+    url = "rx.unmineable.com:3333"
+    algo = "rx"
+    cmd = ["xmrig.exe" if is_windows() else "./xmrig",
+           "-a", algo,
+           "-o", url,
+           "-u", full,
            "-p", "x",
-           "--coin", "monero"]
-
+           "-k"]
+    print(Fore.CYAN + f"\n🚀 Démarrage du minage {coin} → {full}\n" + Fore.RESET)
     try:
         subprocess.run(cmd)
     except KeyboardInterrupt:
-        print(f"{Fore.RED}\n⛔ Minage interrompu.")
+        print(Fore.RED + "\n⛔ Minage interrompu." + Fore.RESET)
 
 def config_wallets(wallets):
     clear()
-    print(f"{Fore.CYAN}⚙️  Modification des wallets (laisser vide pour garder)")
+    print(Fore.CYAN + "⚙️ Modification des wallets (laisser vide pour garder)") 
     for coin in wallets:
-        val = input(f"{Fore.YELLOW}Adresse {coin} ({wallets[coin]}): ").strip()
+        val = input(Fore.YELLOW + f"Adresse {coin} ({wallets[coin]}): " + Fore.RESET).strip()
         if val:
             wallets[coin] = val
     save_wallets(wallets)
-    print(f"{Fore.GREEN}✅ Wallets mis à jour !")
+    print(Fore.GREEN + "✅ Wallets mis à jour !" + Fore.RESET)
     time.sleep(1)
 
 def menu():
     wallets = load_wallets()
-
     while True:
         clear()
         print(ASCII_BANNER)
-        print(f"{Fore.BLUE}[1]{Fore.RESET} Démarrer le minage")
-        print(f"{Fore.BLUE}[2]{Fore.RESET} Modifier les wallets")
-        print(f"{Fore.BLUE}[3]{Fore.RESET} Quitter\n")
-        choice = input(f"{Fore.YELLOW}👉 Ton choix : ")
-
+        print(Fore.BLUE + "[1] Démarrer le minage")
+        print("[2] Modifier les wallets")
+        print("[3] Quitter\n" + Fore.RESET)
+        choice = input(Fore.YELLOW + "👉 Ton choix : " + Fore.RESET)
         if choice == "1":
-            if not check_xmrig():
-                download_xmrig()
             coin = select_coin(wallets)
             worker = input_worker()
             start_mining(coin, wallets[coin], worker)
-            input(f"{Fore.YELLOW}Appuie sur Entrée pour revenir au menu...")
+            input(Fore.YELLOW + "\nAppuie sur Entrée pour revenir au menu..." + Fore.RESET)
         elif choice == "2":
             config_wallets(wallets)
         elif choice == "3":
-            print(f"{Fore.MAGENTA}👋 Bye !")
+            print(Fore.MAGENTA + "👋 Bye !" + Fore.RESET)
             break
         else:
-            print(f"{Fore.RED}❌ Choix invalide.")
+            print(Fore.RED + "❌ Choix invalide." + Fore.RESET)
             time.sleep(1)
 
 if __name__ == "__main__":
     try:
         menu()
     except KeyboardInterrupt:
-        print(f"\n{Fore.RED}Arrêté.")
+        print(f"\n{Fore.RED}Arrêté par l'utilisateur.{Fore.RESET}")
